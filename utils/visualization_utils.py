@@ -425,7 +425,7 @@ def visualize_boxes_and_labels_on_image_array(current_frame_number,image,
   and creates a display string for each detection and overlays these
   on the image. Note that this function modifies the image in place, and returns
   that same image.
-******
+
   Args:
     image: uint8 numpy array with shape (img_height, img_width, 3)
     boxes: a numpy array of shape [N, 4]

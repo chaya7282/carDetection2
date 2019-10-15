@@ -123,7 +123,7 @@ def object_detection_function():
                     sess.run([detection_boxes, detection_scores,
                              detection_classes, num_detections],
                              feed_dict={image_tensor: image_np_expanded})
-
+                boxes_= np.squeeze(boxes)
                 # Visualization of the results of a detection.
                 (counter, csv_line) = \
                     vis_util.visualize_boxes_and_labels_on_image_array(
