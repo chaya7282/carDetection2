@@ -41,11 +41,11 @@ ap.add_argument("-m", "--model",  type=str,default=" XXX",
                 help="path to Caffe pre-trained model")
 ap.add_argument("-i", "--input", type=str,default = "sub-1504619634606.mp4",
                 help="path to optional input video file")
-ap.add_argument("-o", "--output", type=str,
+ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/custom_vehicle_training/out.avi",
                 help="path to optional output video file")
-ap.add_argument("-c", "--confidence", type=float, default=0.965,
+ap.add_argument("-c", "--confidence", type=float, default=0.65,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=1,
+ap.add_argument("-s", "--skip-frames", type=int, default=15,
                 help="# of skip frames between detections")
 args = vars(ap.parse_args())
 
@@ -81,8 +81,8 @@ categories = label_map_util.convert_label_map_to_categories(label_map,
         max_num_classes=NUM_CLASSES, use_display_name=True)
 category_index = label_map_util.create_category_index(categories)
 
-
-
+frame_width = None
+frame_height =  None
 
 # if a video path was not supplied, grab a reference to the webcam
 if not args.get("input", False):
@@ -94,9 +94,29 @@ if not args.get("input", False):
 else:
     print("[INFO] opening video file...")
     vs = cv2.VideoCapture(args["input"])
+    # Default resolutions of the frame are obtained.The default resolutions are system dependent.
+    # We convert the resolutions from float to integer.
+
+
+frame_width = int(vs.get(3))
+frame_height = int(vs.get(4))
 
 # initialize the video writer (we'll instantiate later if need be)
 writer = None
+# if we are supposed to be writing a video to disk, initialize
+# the writer
+
+if not args.get("output", False):
+    print("[INFO] starting video stream...")
+    writer = None
+    time.sleep(2.0)
+
+# otherwise, grab a reference to the video file
+else:
+    print("[INFO] opening output video file...")
+    # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
+    writer = cv2.VideoWriter(args["output"], cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (frame_width, frame_height))
+
 
 # initialize the frame dimensions (we'll set them as soon as we read
 # the first frame from the video)
@@ -119,6 +139,7 @@ totalUp = 0
 # start the frames per second throughput estimator
 
 (ret, frame2) = vs.read()
+trackers = []
 
 with detection_graph.as_default():
     with tf.Session(graph=detection_graph) as sess:
@@ -138,6 +159,8 @@ with detection_graph.as_default():
 
         # loop over frames from the video stream
         while vs.isOpened():
+            if 20 < totalFrames:
+                break
             # grab the next frame and handle if we are reading from either
             # VideoCapture or VideoStream
             ret = False
@@ -162,16 +185,13 @@ with detection_graph.as_default():
             # (2) the correlation trackers
             status = "Waiting"
             rects = []
-
             # check to see if we should run a more computationally expensive
             # object detection method to aid our tracker
             if totalFrames % args["skip_frames"] == 0:
                 # set the status and initialize our new set of object trackers
                 status = "Detecting"
-                rgb = frame
-                trackers = []
-
-                input_frame = frame
+                trackers =[]
+                input_frame = frame\
                 # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
                 image_np_expanded = np.expand_dims(input_frame, axis=0)
 
@@ -199,27 +219,22 @@ with detection_graph.as_default():
 
                         # compute the (x, y)-coordinates of the bounding box
                         # for the object
-                        box = boxes[i]
+                        box = boxes[i] * np.array([H, W, H, W])
 
-                    #    box = box * np.array([W, H, W, H])
-                        ymin = int(box[0] *H)
-                        xmin =int( box[1]*W)
-                        ymax = int(box[2]*H)
-                        xmax= int(box[3]*W)
                         # use the center (x, y)-coordinates to derive the top
                         # and and left corner of the bounding box
 
                         # update our list of bounding box coordinates,
                         # confidences, and class IDs
 
-
+                        (ymin, xmin, ymax, xmax)= box.astype(np.int32)
 
                         # construct a dlib rectangle object from the bounding
                         # box coordinates and then start the dlib correlation
                         # tracker
                         tracker = dlib.correlation_tracker()
                         rect = dlib.rectangle( xmin, ymin, xmax, ymax)
-                        tracker.start_track(rgb, rect)
+                        tracker.start_track(frame, rect)
 
                         # add the tracker to our list of trackers so we can
                         # utilize it during skip frames
@@ -227,16 +242,8 @@ with detection_graph.as_default():
                         rects.append((xmin, ymin, xmax, ymax))
 
 
-
-
-
-                for j in range(0, len(rects)):
-                    cv2.rectangle(frame, (rects[j][0],  rects[j][1]), ( rects[j][2], rects[j][3]), (255, 0, 0))
-
-                plt.imshow(frame, cmap='gray')
-                plt.show()
                 # otherwise, we should utilize our object *trackers* rather than
-            # object *detectors* to obtain a higher frame processing throughput
+        # object *detectors* to obtain a higher frame processing throughput
             else:
                 # loop over the trackers
                 for tracker in trackers:
@@ -249,24 +256,20 @@ with detection_graph.as_default():
                     pos = tracker.get_position()
 
                     # unpack the position object
-                    startX = int(pos.left())
-                    startY = int(pos.top())
-                    endX = int(pos.right())
-                    endY = int(pos.bottom())
-
-                    # add the bounding box coordinates to the rectangles list
+                    roi = [pos.left(), pos.top(), pos.right(), pos.bottom()]
+                    (startX, startY,endX,endY) = [int(n) for n in roi]
+                   # add the bounding box coordinates to the rectangles list
                     rects.append((startX, startY, endX, endY))
 
-            # draw a horizontal line in the center of the frame -- once an
-            # object crosses this line we will determine whether they were
-            # moving 'up' or 'down'
-            cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
+                # draw a horizontal line in the center of the frame -- once an
+                # object crosses this line we will determine whether they were
+                # moving 'up' or 'down'
+                cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
 
-            # use the centroid tracker to associate the (1) old object
-            # centroids with (2) the newly computed object centroids
+                # use the centroid tracker to associate the (1) old object
+                # centroids with (2) the newly computed object centroids
+
             objects = ct.update(rects)
-
-
 
             # loop over the tracked objects
             for (objectID, centroid) in objects.items():
@@ -288,22 +291,23 @@ with detection_graph.as_default():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
-            # construct a tuple of information we will be displaying on the
-            # frame
-            info = [
-                ("Up", totalUp),
-                ("Down", totalDown),
-                ("Status", status),
-                ("Frame number", totalFrames)
-            ]
+                # construct a tuple of information we will be displaying on the
+                # frame
+                info = [
+                    ("Status", status),
+                    ("Frame number", totalFrames)
+                ]
 
-            # loop over the info tuples and draw them on our frame
-            for (i, (k, v)) in enumerate(info):
-                text = "{}: {}".format(k, v)
-                cv2.putText(frame, text, (10, H - ((i * 20) + 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                # loop over the info tuples and draw them on our frame
+                for (i, (k, v)) in enumerate(info):
+                    text = "{}: {}".format(k, v)
+                    cv2.putText(frame, text, (10, H - ((i * 20) + 20)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-            # check to see if we should write the frame to disk
+         #   plt.imshow(frame, cmap='gray')
+         #   plt.show()
+
+# check to see if we should write the frame to disk
             if writer is not None:
                 writer.write(frame)
 
@@ -328,5 +332,7 @@ with detection_graph.as_default():
         # otherwise, release the video file pointer
         else:
             vs.release()
+
+
 
 # close any open windows
