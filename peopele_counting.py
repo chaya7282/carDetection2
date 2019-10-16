@@ -39,13 +39,15 @@ ap.add_argument("-p", "--prototxt",  type=str,default=" XXX",
                 help="path to Caffe 'deploy' prototxt file")
 ap.add_argument("-m", "--model",  type=str,default=" XXX",
                 help="path to Caffe pre-trained model")
-ap.add_argument("-i", "--input", type=str,default = "sub-1504619634606.mp4",
+ap.add_argument("-i", "--input", type=str,default = "sub-1504614469486.mp4",
                 help="path to optional input video file")
 ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/custom_vehicle_training/out.avi",
                 help="path to optional output video file")
-ap.add_argument("-c", "--confidence", type=float, default=0.65,
+ap.add_argument("-c", "--confidence", type=float, default=0.6,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=15,
+ap.add_argument("-s", "--skip-frames", type=int, default=5,
+                help="# of skip frames between detections")
+ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
                 help="# of skip frames between detections")
 args = vars(ap.parse_args())
 
@@ -115,7 +117,7 @@ if not args.get("output", False):
 else:
     print("[INFO] opening output video file...")
     # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
-    writer = cv2.VideoWriter(args["output"], cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (frame_width, frame_height))
+    writer = cv2.VideoWriter(args["output"], cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 1, (frame_width, frame_height))
 
 
 # initialize the frame dimensions (we'll set them as soon as we read
@@ -135,7 +137,7 @@ trackableObjects = {}
 totalFrames = 0
 totalDown = 0
 totalUp = 0
-
+car_count =0;
 # start the frames per second throughput estimator
 
 (ret, frame2) = vs.read()
@@ -159,13 +161,14 @@ with detection_graph.as_default():
 
         # loop over frames from the video stream
         while vs.isOpened():
-            if 20 < totalFrames:
-                break
+
             # grab the next frame and handle if we are reading from either
             # VideoCapture or VideoStream
             ret = False
             time.sleep(2.0)
 
+            if 2000 <  totalFrames:
+                break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
             # if we are viewing a video and we did not grab a frame then we
@@ -264,7 +267,7 @@ with detection_graph.as_default():
                 # draw a horizontal line in the center of the frame -- once an
                 # object crosses this line we will determine whether they were
                 # moving 'up' or 'down'
-                cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
+            cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
 
                 # use the centroid tracker to associate the (1) old object
                 # centroids with (2) the newly computed object centroids
@@ -281,6 +284,49 @@ with detection_graph.as_default():
                 if to is None:
                     to = TrackableObject(objectID, centroid)
 
+                else:
+                    # the difference between the y-coordinate of the *current*
+                    # centroid and the mean of *previous* centroids will tell
+                    # us in which direction the object is moving (negative for
+                    # 'up' and positive for 'down')
+                    y = [c[1] for c in to.centroids]
+                    direction = centroid[1] - np.mean(y)
+                    to.centroids.append(centroid)
+
+                    # check to see if the object has been counted or not
+                    if not to.counted:
+                        # if the direction is negative (indicating the object
+                        # is moving up) AND the centroid is above the center
+                        # line, count the object
+                        if  centroid[1] < H // 2:
+                             to.pos_up = True
+
+                        # if the direction is positive (indicating the object
+                        # is moving down) AND the centroid is below the
+                        # center line, count the object
+                        elif  centroid[1] > H // 2:
+                             to.pos_down = True
+
+                        if to.pos_up  and to.pos_down:
+                            car_count += 1
+                            to.counted = True;
+                    if args.get("draw-trajectory"):
+                        pts= to.centroids
+                        # loop over the set of tracked points
+                        for k in range(1, len(pts)):
+                            # if either of the tracked points are None, ignore
+                            # them
+                            if pts[k - 1] is None or pts[k] is None:
+                                continue
+
+                            # otherwise, compute the thickness of the line and
+                            # draw the connecting lines
+
+                            cv2.line(frame, (pts[k - 1][0],pts[k - 1][1]),  (pts[k ][0],pts[k ][1]), (0, 0, 255), 2)
+
+
+
+
                 # store the trackable object in our dictionary
                 trackableObjects[objectID] = to
 
@@ -291,18 +337,19 @@ with detection_graph.as_default():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
-                # construct a tuple of information we will be displaying on the
-                # frame
-                info = [
-                    ("Status", status),
-                    ("Frame number", totalFrames)
-                ]
+            # construct a tuple of information we will be displaying on the
+            # frame
+            info = [
+                ("car_count", car_count),
+                ("Status", status),
+                ("Frame number", totalFrames)
+            ]
 
-                # loop over the info tuples and draw them on our frame
-                for (i, (k, v)) in enumerate(info):
-                    text = "{}: {}".format(k, v)
-                    cv2.putText(frame, text, (10, H - ((i * 20) + 20)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            # loop over the info tuples and draw them on our frame
+            for (i, (k, v)) in enumerate(info):
+                text = "{}: {}".format(k, v)
+                cv2.putText(frame, text, (10, H - ((i * 20) + 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
          #   plt.imshow(frame, cmap='gray')
          #   plt.show()
@@ -311,12 +358,7 @@ with detection_graph.as_default():
             if writer is not None:
                 writer.write(frame)
 
-            # show the output frame
-
-            # cv2.imshow("Frame", frame))
-            plt.imshow(frame, cmap='gray')
-            cv2.imwrite("test_2.jpg",frame)
-            # increment the total number of frames processed thus far and
+           # increment the total number of frames processed thus far and
             # then update the FPS counter
             totalFrames += 1
             print(totalFrames)
