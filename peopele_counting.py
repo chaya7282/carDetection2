@@ -24,6 +24,8 @@ import tensorflow as tf
 import zipfile
 import cv2
 import numpy as np
+from numpy import ones,vstack
+from numpy.linalg import lstsq
 import os
 # Object detection imports
 from utils import label_map_util
@@ -33,17 +35,53 @@ import PIL.ImageColor as ImageColor
 import PIL.ImageDraw as ImageDraw
 import PIL.ImageFont as ImageFont
 
+class line:
+    def __init__(self, point1,point2):
+        self.point1 = point1
+        self.point2 = point2
+
+        x_coords, y_coords = zip(*[self.point1,self. point2])
+        A = vstack([x_coords,ones(len(x_coords))]).T
+        m, c = lstsq(A, y_coords)[0]
+        self.m =m
+        self.c =c
+
+#Line Solution is y = {m}x + {c}".
+    def is_point_up_line(self,val_point):
+        if (val_point[0] < self.point1[0] and   self.point2[0] < val_point[0]) or (val_point[0] < self.point2[0] and  self.point1[0] < val_point[0]):
+
+            y_line = self.m * val_point[0]+ self.c
+            if   y_line < val_point[1]:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+
+
+    def is_point_down_line(self,val_point):
+        if (val_point[0] < self.point1[0] and self.point2[0] < val_point[0]) or ( val_point[0] < self.point2[0] and self.point1[0] < val_point[0]):
+            y_line = self.m * val_point[0] + self.c
+            if   val_point[1]  < y_line  :
+                return True
+            else:
+                return False
+        else:
+            return False
+
+
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-p", "--prototxt",  type=str,default=" XXX",
                 help="path to Caffe 'deploy' prototxt file")
 ap.add_argument("-m", "--model",  type=str,default=" XXX",
                 help="path to Caffe pre-trained model")
-ap.add_argument("-i", "--input", type=str,default = "sub-1504614469486.mp4",
+ap.add_argument("-i", "--input", type=str,default = "Roads - 1952.mp4",
                 help="path to optional input video file")
 ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/custom_vehicle_training/out.avi",
                 help="path to optional output video file")
-ap.add_argument("-c", "--confidence", type=float, default=0.6,
+ap.add_argument("-c", "--confidence", type=float, default=0.7,
                 help="minimum probability to filter weak detections")
 ap.add_argument("-s", "--skip-frames", type=int, default=5,
                 help="# of skip frames between detections")
@@ -52,7 +90,7 @@ ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
 args = vars(ap.parse_args())
 
 # What model to download.
-MODEL_NAME = 'mask_rcnn_inception_v2_coco_2018_01_28'
+MODEL_NAME = '/home/ubuntu/PycharmProjects/carDetection2/ssd_mobilenet_v1_coco_2018_01_28'
 MODEL_FILE = MODEL_NAME + '.tar.gz'
 DOWNLOAD_BASE = \
     'http://download.tensorflow.org/models/object_detection/'
@@ -63,6 +101,7 @@ PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
 # List of the strings that is used to add correct label for each box.
 PATH_TO_LABELS = os.path.join('data', 'mscoco_label_map.pbtxt')
 
+Line_Position = 0.52
 NUM_CLASSES = 90
 
 # Download Model
@@ -117,8 +156,10 @@ if not args.get("output", False):
 else:
     print("[INFO] opening output video file...")
     # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
-    writer = cv2.VideoWriter(args["output"], cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 1, (frame_width, frame_height))
 
+# Define the codec and create VideoWriter object
+fourcc = cv2.VideoWriter_fourcc(*'XVID')
+writer = cv2.VideoWriter('Roads - 1952-out.mp4', fourcc, 20.0, (frame_width, frame_height))
 
 # initialize the frame dimensions (we'll set them as soon as we read
 # the first frame from the video)
@@ -128,7 +169,7 @@ H = None
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
-ct = CentroidTracker(maxDisappeared=40, maxDistance=50)
+ct = CentroidTracker(maxDisappeared=10, maxDistance=50)
 trackers = []
 trackableObjects = {}
 
@@ -139,8 +180,12 @@ totalDown = 0
 totalUp = 0
 car_count =0;
 # start the frames per second throughput estimator
-
+line_coord =[(337,230),(700,581)]
+#for police car video
+cross_line = line((657,523),(837,516))
 (ret, frame2) = vs.read()
+cv2.imwrite("test.jpg", frame2)
+
 trackers = []
 
 with detection_graph.as_default():
@@ -158,6 +203,8 @@ with detection_graph.as_default():
         num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
 
+                # draw both the ID of the object and the centroid of the
+                # object on the output frame
 
         # loop over frames from the video stream
         while vs.isOpened():
@@ -167,7 +214,7 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 2000 <  totalFrames:
+            if 2000 < totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
@@ -194,7 +241,7 @@ with detection_graph.as_default():
                 # set the status and initialize our new set of object trackers
                 status = "Detecting"
                 trackers =[]
-                input_frame = frame\
+                input_frame = frame
                 # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
                 image_np_expanded = np.expand_dims(input_frame, axis=0)
 
@@ -219,6 +266,7 @@ with detection_graph.as_default():
                         # if the class label is not a person, ignore it
                         if categories[classes[i]-1]['name'] != "car":
                             continue
+
 
                         # compute the (x, y)-coordinates of the bounding box
                         # for the object
@@ -267,13 +315,13 @@ with detection_graph.as_default():
                 # draw a horizontal line in the center of the frame -- once an
                 # object crosses this line we will determine whether they were
                 # moving 'up' or 'down'
-            cv2.line(frame, (0, H // 2), (W, H // 2), (0, 255, 255), 2)
+
 
                 # use the centroid tracker to associate the (1) old object
                 # centroids with (2) the newly computed object centroids
 
             objects = ct.update(rects)
-
+            line_color = (0, 0, 255)
             # loop over the tracked objects
             for (objectID, centroid) in objects.items():
                 # check to see if a trackable object exists for the current
@@ -283,7 +331,7 @@ with detection_graph.as_default():
                 # if there is no existing trackable object, create one
                 if to is None:
                     to = TrackableObject(objectID, centroid)
-
+                    trackableObjects[objectID] = to
                 else:
                     # the difference between the y-coordinate of the *current*
                     # centroid and the mean of *previous* centroids will tell
@@ -298,18 +346,21 @@ with detection_graph.as_default():
                         # if the direction is negative (indicating the object
                         # is moving up) AND the centroid is above the center
                         # line, count the object
-                        if  centroid[1] < H // 2:
-                             to.pos_up = True
+                        #                       if  centroid[1] < H *Line_Position:
+                        if cross_line.is_point_down_line(centroid):
+                            to.pos_down = True
 
                         # if the direction is positive (indicating the object
                         # is moving down) AND the centroid is below the
                         # center line, count the object
-                        elif  centroid[1] > H // 2:
-                             to.pos_down = True
+                        #                      elif  centroid[1] > H  *Line_Position:
+                        if cross_line.is_point_up_line(centroid):
+                            to.pos_up = True
 
                         if to.pos_up  and to.pos_down:
                             car_count += 1
-                            to.counted = True;
+                            to.counted = True
+                            line_color = ( 255,0,0)
                     if args.get("draw-trajectory"):
                         pts= to.centroids
                         # loop over the set of tracked points
@@ -323,12 +374,8 @@ with detection_graph.as_default():
                             # draw the connecting lines
 
                             cv2.line(frame, (pts[k - 1][0],pts[k - 1][1]),  (pts[k ][0],pts[k ][1]), (0, 0, 255), 2)
-
-
-
-
                 # store the trackable object in our dictionary
-                trackableObjects[objectID] = to
+
 
                 # draw both the ID of the object and the centroid of the
                 # object on the output frame
@@ -337,8 +384,12 @@ with detection_graph.as_default():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
+
+      #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
+            cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
             # construct a tuple of information we will be displaying on the
             # frame
+            cv2.imwrite("test.jpg",frame)
             info = [
                 ("car_count", car_count),
                 ("Status", status),
@@ -348,13 +399,13 @@ with detection_graph.as_default():
             # loop over the info tuples and draw them on our frame
             for (i, (k, v)) in enumerate(info):
                 text = "{}: {}".format(k, v)
-                cv2.putText(frame, text, (10, H - ((i * 20) + 20)),
+                cv2.putText(frame, text, (10, ((i * 20) + 20)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-         #   plt.imshow(frame, cmap='gray')
-         #   plt.show()
+             #   plt.imshow(frame, cmap='gray')
+             #   plt.show()
 
-# check to see if we should write the frame to disk
+    # check to see if we should write the frame to disk
             if writer is not None:
                 writer.write(frame)
 
