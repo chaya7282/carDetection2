@@ -81,9 +81,9 @@ ap.add_argument("-i", "--input", type=str,default = "Roads - 1952.mp4",
                 help="path to optional input video file")
 ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/custom_vehicle_training/out.avi",
                 help="path to optional output video file")
-ap.add_argument("-c", "--confidence", type=float, default=0.7,
+ap.add_argument("-c", "--confidence", type=float, default=0.1,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=5,
+ap.add_argument("-s", "--skip-frames", type=int, default=10,
                 help="# of skip frames between detections")
 ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
                 help="# of skip frames between detections")
@@ -159,7 +159,7 @@ else:
 
 # Define the codec and create VideoWriter object
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
-writer = cv2.VideoWriter('Roads - 1952-out.mp4', fourcc, 20.0, (frame_width, frame_height))
+writer = cv2.VideoWriter('Roads-out - 1952.mp4', fourcc, 20.0, (frame_width, frame_height))
 
 # initialize the frame dimensions (we'll set them as soon as we read
 # the first frame from the video)
@@ -169,11 +169,12 @@ H = None
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
-ct = CentroidTracker(maxDisappeared=10, maxDistance=50)
+ct = CentroidTracker(maxDisappeared=20, maxDistance=40)
 trackers = []
 trackableObjects = {}
 
 # initialize the total number of frames processed thus far, along
+
 # with the total number of objects that have moved either up or down
 totalFrames = 0
 totalDown = 0
@@ -182,7 +183,7 @@ car_count =0;
 # start the frames per second throughput estimator
 line_coord =[(337,230),(700,581)]
 #for police car video
-cross_line = line((657,523),(837,516))
+cross_line = line((655,572),(1080,501))
 (ret, frame2) = vs.read()
 cv2.imwrite("test.jpg", frame2)
 
@@ -205,6 +206,7 @@ with detection_graph.as_default():
 
                 # draw both the ID of the object and the centroid of the
                 # object on the output frame
+        fgbg = cv2.createBackgroundSubtractorMOG2()
 
         # loop over frames from the video stream
         while vs.isOpened():
@@ -214,10 +216,12 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 2000 < totalFrames:
+            if 800 < totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
+            fgmask = fgbg.apply(frame)
+
             # if we are viewing a video and we did not grab a frame then we
             # have reached the end of the video
             if args["input"] is not None and frame is None:
@@ -237,10 +241,13 @@ with detection_graph.as_default():
             rects = []
             # check to see if we should run a more computationally expensive
             # object detection method to aid our tracker
+            ct.track(frame)
+
             if totalFrames % args["skip_frames"] == 0:
+
                 # set the status and initialize our new set of object trackers
                 status = "Detecting"
-                trackers =[]
+
                 input_frame = frame
                 # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
                 image_np_expanded = np.expand_dims(input_frame, axis=0)
@@ -250,11 +257,14 @@ with detection_graph.as_default():
                     sess.run([detection_boxes, detection_scores,
                               detection_classes, num_detections],
                              feed_dict={image_tensor: image_np_expanded})
+
+
                 boxes = np.squeeze(boxes)
                 classes = np.squeeze(classes).astype(np.int32)
                 scores = np.squeeze(scores)
 
                 for i in range(0,len(boxes)):
+
                     # extract the confidence (i.e., probability) associated
                     # with the prediction
                     confidence = scores[i]
@@ -263,12 +273,10 @@ with detection_graph.as_default():
                     # confidence
                     if confidence > args["confidence"]:
 
-                        # if the class label is not a person, ignore it
+                     # if the class label is not a person, ignore it
                         if categories[classes[i]-1]['name'] != "car":
                             continue
-
-
-                        # compute the (x, y)-coordinates of the bounding box
+                    # compute the (x, y)-coordinates of the bounding box
                         # for the object
                         box = boxes[i] * np.array([H, W, H, W])
 
@@ -280,47 +288,11 @@ with detection_graph.as_default():
 
                         (ymin, xmin, ymax, xmax)= box.astype(np.int32)
 
-                        # construct a dlib rectangle object from the bounding
-                        # box coordinates and then start the dlib correlation
-                        # tracker
-                        tracker = dlib.correlation_tracker()
-                        rect = dlib.rectangle( xmin, ymin, xmax, ymax)
-                        tracker.start_track(frame, rect)
-
-                        # add the tracker to our list of trackers so we can
-                        # utilize it during skip frames
-                        trackers.append(tracker)
                         rects.append((xmin, ymin, xmax, ymax))
+                objects = ct.update(frame,rects, "Detecting")
+            # loop over the trackers
 
 
-                # otherwise, we should utilize our object *trackers* rather than
-        # object *detectors* to obtain a higher frame processing throughput
-            else:
-                # loop over the trackers
-                for tracker in trackers:
-                    # set the status of our system to be 'tracking' rather
-                    # than 'waiting' or 'detecting'
-                    status = "Tracking"
-
-                    # update the tracker and grab the updated position
-                    tracker.update(frame)
-                    pos = tracker.get_position()
-
-                    # unpack the position object
-                    roi = [pos.left(), pos.top(), pos.right(), pos.bottom()]
-                    (startX, startY,endX,endY) = [int(n) for n in roi]
-                   # add the bounding box coordinates to the rectangles list
-                    rects.append((startX, startY, endX, endY))
-
-                # draw a horizontal line in the center of the frame -- once an
-                # object crosses this line we will determine whether they were
-                # moving 'up' or 'down'
-
-
-                # use the centroid tracker to associate the (1) old object
-                # centroids with (2) the newly computed object centroids
-
-            objects = ct.update(rects)
             line_color = (0, 0, 255)
             # loop over the tracked objects
             for (objectID, centroid) in objects.items():
@@ -328,10 +300,17 @@ with detection_graph.as_default():
                 # object ID
                 to = trackableObjects.get(objectID, None)
 
+
+                # add the tracker to our list of trackers so we can
+                # utilize it during skip frames
+
+
                 # if there is no existing trackable object, create one
                 if to is None:
                     to = TrackableObject(objectID, centroid)
+
                     trackableObjects[objectID] = to
+
                 else:
                     # the difference between the y-coordinate of the *current*
                     # centroid and the mean of *previous* centroids will tell
@@ -361,20 +340,6 @@ with detection_graph.as_default():
                             car_count += 1
                             to.counted = True
                             line_color = ( 255,0,0)
-                    if args.get("draw-trajectory"):
-                        pts= to.centroids
-                        # loop over the set of tracked points
-                        for k in range(1, len(pts)):
-                            # if either of the tracked points are None, ignore
-                            # them
-                            if pts[k - 1] is None or pts[k] is None:
-                                continue
-
-                            # otherwise, compute the thickness of the line and
-                            # draw the connecting lines
-
-                            cv2.line(frame, (pts[k - 1][0],pts[k - 1][1]),  (pts[k ][0],pts[k ][1]), (0, 0, 255), 2)
-                # store the trackable object in our dictionary
 
 
                 # draw both the ID of the object and the centroid of the
@@ -385,11 +350,11 @@ with detection_graph.as_default():
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
 
-      #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
+            #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
             cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
             # construct a tuple of information we will be displaying on the
             # frame
-            cv2.imwrite("test.jpg",frame)
+
             info = [
                 ("car_count", car_count),
                 ("Status", status),
@@ -402,14 +367,16 @@ with detection_graph.as_default():
                 cv2.putText(frame, text, (10, ((i * 20) + 20)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
+            cv2.imwrite("test.jpg", frame)
+            cv2.imwrite("mask.jpg",fgmask)
              #   plt.imshow(frame, cmap='gray')
              #   plt.show()
 
-    # check to see if we should write the frame to disk
+            # check to see if we should write the frame to disk
             if writer is not None:
                 writer.write(frame)
 
-           # increment the total number of frames processed thus far and
+            # increment the total number of frames processed thus far and
             # then update the FPS counter
             totalFrames += 1
             print(totalFrames)
@@ -427,5 +394,15 @@ with detection_graph.as_default():
             vs.release()
 
 
+def non_max_suppression_with_tf(sess, boxes, scores, max_output_size, iou_threshold=0.5):
+    '''
+    Provide a tensorflow session and get non-maximum suppression
 
+    max_output_size, iou_threshold are passed to tf.image.non_max_suppression
+    '''
+    non_max_idxs = tf.image.non_max_suppression(boxes, scores, max_output_size, iou_threshold=iou_threshold)
+    new_boxes = tf.cast(tf.gather(boxes, non_max_idxs), tf.int32)
+    new_scores = tf.gather(scores, non_max_idxs)
+
+    return sess.run([new_boxes, new_scores])
 # close any open windows
