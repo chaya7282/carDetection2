@@ -17,7 +17,7 @@ import numpy as np
 import argparse
 
 import time
-import dlib
+
 import cv2
 from matplotlib import pyplot as plt
 import tensorflow as tf
@@ -29,7 +29,7 @@ from numpy.linalg import lstsq
 import os
 # Object detection imports
 from utils import label_map_util
-from utils import visualization_utils as vis_util
+
 import PIL.Image as Image
 import PIL.ImageColor as ImageColor
 import PIL.ImageDraw as ImageDraw
@@ -58,8 +58,6 @@ class line:
         else:
             return False
 
-
-
     def is_point_down_line(self,val_point):
         if (val_point[0] < self.point1[0] and self.point2[0] < val_point[0]) or ( val_point[0] < self.point2[0] and self.point1[0] < val_point[0]):
             y_line = self.m * val_point[0] + self.c
@@ -70,40 +68,47 @@ class line:
         else:
             return False
 
+    def point_distance_from_line(self,val_point):
+        pointDist= 10000000
 
+        if (val_point[0] < self.point1[0] and self.point2[0] < val_point[0]) or ( val_point[0] < self.point2[0] and self.point1[0] < val_point[0]):
+            y_line = self.m * val_point[0] + self.c
+            pointDist = abs(y_line - val_point[1])
+        return pointDist
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-p", "--prototxt",  type=str,default=" XXX",
                 help="path to Caffe 'deploy' prototxt file")
 ap.add_argument("-m", "--model",  type=str,default=" XXX",
                 help="path to Caffe pre-trained model")
-ap.add_argument("-i", "--input", type=str,default = "Roads - 1952.mp4",
+ap.add_argument("-i", "--input", type=str,default = "/home/ubuntu/PycharmProjects/Input Videos/Cars - 1900.mp4",
                 help="path to optional input video file")
-ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/custom_vehicle_training/out.avi",
+ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProjects/Output Videos/Cars - 1900.mp4",
                 help="path to optional output video file")
-ap.add_argument("-c", "--confidence", type=float, default=0.1,
+ap.add_argument("-c", "--confidence", type=float, default=0.3,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=10,
+ap.add_argument("-s", "--skip-frames", type=int, default=5,
                 help="# of skip frames between detections")
+
 ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
                 help="# of skip frames between detections")
 args = vars(ap.parse_args())
 
 # What model to download.
-MODEL_NAME = '/home/ubuntu/PycharmProjects/carDetection2/ssd_mobilenet_v1_coco_2018_01_28'
+MODEL_NAME = '/home/ubuntu/PycharmProjects/carDetection2/mobilenet_ssd/frozen_inference_graph.pb'
 MODEL_FILE = MODEL_NAME + '.tar.gz'
 DOWNLOAD_BASE = \
     'http://download.tensorflow.org/models/object_detection/'
 
 # Path to frozen detection graph. This is the actual model that is used for the object detection.
-PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
+PATH_TO_CKPT = MODEL_NAME
 
 # List of the strings that is used to add correct label for each box.
 PATH_TO_LABELS = os.path.join('data', 'mscoco_label_map.pbtxt')
 
 Line_Position = 0.52
 NUM_CLASSES = 90
-
+print("hello")
 # Download Model
 # uncomment if you have not download the model yet
 # Load a (frozen) Tensorflow model into memory.
@@ -158,8 +163,8 @@ else:
     # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
 
 # Define the codec and create VideoWriter object
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-writer = cv2.VideoWriter('Roads-out - 1952.mp4', fourcc, 20.0, (frame_width, frame_height))
+fourcc = cv2.VideoWriter_fourcc('M','J','P','G')
+writer = cv2.VideoWriter(args["output"], fourcc, 1.0, (frame_width, frame_height))
 
 # initialize the frame dimensions (we'll set them as soon as we read
 # the first frame from the video)
@@ -169,7 +174,7 @@ H = None
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
-ct = CentroidTracker(maxDisappeared=20, maxDistance=40)
+ct = CentroidTracker(maxDisappeared=60, maxDistance=70)
 trackers = []
 trackableObjects = {}
 
@@ -183,12 +188,12 @@ car_count =0;
 # start the frames per second throughput estimator
 line_coord =[(337,230),(700,581)]
 #for police car video
-cross_line = line((655,572),(1080,501))
+cross_line = line((380,380),(1043,427))
 (ret, frame2) = vs.read()
 cv2.imwrite("test.jpg", frame2)
 
 trackers = []
-
+CarLineDis_Thres = 20
 with detection_graph.as_default():
     with tf.Session(graph=detection_graph) as sess:
         # Definite input and output Tensors for detection_graph
@@ -216,7 +221,7 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 800 < totalFrames:
+            if 500< totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
@@ -264,9 +269,7 @@ with detection_graph.as_default():
                 scores = np.squeeze(scores)
 
                 for i in range(0,len(boxes)):
-
-                    # extract the confidence (i.e., probability) associated
-                    # with the prediction
+                   # with the prediction
                     confidence = scores[i]
 
                     # filter out weak detections by requiring a minimum
@@ -280,66 +283,29 @@ with detection_graph.as_default():
                         # for the object
                         box = boxes[i] * np.array([H, W, H, W])
 
-                        # use the center (x, y)-coordinates to derive the top
-                        # and and left corner of the bounding box
-
-                        # update our list of bounding box coordinates,
-                        # confidences, and class IDs
-
                         (ymin, xmin, ymax, xmax)= box.astype(np.int32)
 
                         rects.append((xmin, ymin, xmax, ymax))
-                objects = ct.update(frame,rects, "Detecting")
+                objects = ct.update(frame,rects,scores, "Detecting")
             # loop over the trackers
 
 
             line_color = (0, 0, 255)
             # loop over the tracked objects
+            pos_up =0
+            pos_down =0
+
+
             for (objectID, centroid) in objects.items():
-                # check to see if a trackable object exists for the current
-                # object ID
+
+
+             # if there is no existing trackable object, create one
+              #  if cross_line.point_distance_from_line(centroid) < CarLineDis_Thres:
+
                 to = trackableObjects.get(objectID, None)
-
-
-                # add the tracker to our list of trackers so we can
-                # utilize it during skip frames
-
-
-                # if there is no existing trackable object, create one
                 if to is None:
                     to = TrackableObject(objectID, centroid)
-
                     trackableObjects[objectID] = to
-
-                else:
-                    # the difference between the y-coordinate of the *current*
-                    # centroid and the mean of *previous* centroids will tell
-                    # us in which direction the object is moving (negative for
-                    # 'up' and positive for 'down')
-                    y = [c[1] for c in to.centroids]
-                    direction = centroid[1] - np.mean(y)
-                    to.centroids.append(centroid)
-
-                    # check to see if the object has been counted or not
-                    if not to.counted:
-                        # if the direction is negative (indicating the object
-                        # is moving up) AND the centroid is above the center
-                        # line, count the object
-                        #                       if  centroid[1] < H *Line_Position:
-                        if cross_line.is_point_down_line(centroid):
-                            to.pos_down = True
-
-                        # if the direction is positive (indicating the object
-                        # is moving down) AND the centroid is below the
-                        # center line, count the object
-                        #                      elif  centroid[1] > H  *Line_Position:
-                        if cross_line.is_point_up_line(centroid):
-                            to.pos_up = True
-
-                        if to.pos_up  and to.pos_down:
-                            car_count += 1
-                            to.counted = True
-                            line_color = ( 255,0,0)
 
 
                 # draw both the ID of the object and the centroid of the
@@ -347,11 +313,30 @@ with detection_graph.as_default():
                 text = "ID {}".format(objectID)
                 cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                text = "Mean score {0:.2f}".format(ct.getpathScore(objectID))
+                cv2.putText(frame, text, (centroid[0] - 20, centroid[1] - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                text = "Path Length {0:.2f}".format(ct.getpathlength(objectID))
+                cv2.putText(frame, text, (centroid[0] - 30, centroid[1] - 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                text = "Times  detected {0:.2f}".format(ct.getNubTimesDetect(objectID))
+                cv2.putText(frame, text, (centroid[0] - 40, centroid[1] - 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                text = "Mean score {0:.2f}".format(ct.getpathScore(objectID))
+                cv2.putText(frame, text, (centroid[0] - 20, centroid[1] - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
+                if (5 <  ct.getNubTimesDetect(objectID)) and not ct.IsCounted(objectID) and  (0.5 < ct.getpathScore(objectID) ):
+                    car_count = car_count +1
+                    ct.setCounted(objectID,True)
 
-            #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
-            cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
+#      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
+            #cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
             # construct a tuple of information we will be displaying on the
             # frame
 
@@ -369,6 +354,7 @@ with detection_graph.as_default():
 
             cv2.imwrite("test.jpg", frame)
             cv2.imwrite("mask.jpg",fgmask)
+
              #   plt.imshow(frame, cmap='gray')
              #   plt.show()
 
@@ -376,7 +362,7 @@ with detection_graph.as_default():
             if writer is not None:
                 writer.write(frame)
 
-            # increment the total number of frames processed thus far and
+            # increment the total ubuntunumber of frames processed thus far and
             # then update the FPS counter
             totalFrames += 1
             print(totalFrames)
