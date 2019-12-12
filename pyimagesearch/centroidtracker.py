@@ -3,6 +3,47 @@ from scipy.spatial import distance as dist
 from collections import OrderedDict
 import numpy as np
 import cv2
+import statistics
+from math import hypot
+import math
+
+
+
+
+class onePath:
+	def __init__(self, centroid, score):
+
+		self.pts =list()
+		self.scores= list()
+
+		self.addCentroid(centroid,  score )
+		self.IsCounted = False;
+
+	def addCentroid(self, centroid,  score ):
+		self.pts.insert(0,centroid)
+		self.scores.insert(0,score)
+
+	def getpathlength(self):
+
+		n = len(self.pts)
+
+		x = [self.pts[i][0] for i in range(n)]
+		y = [self.pts[i][1] for i in range(n)]
+		lv = [math.sqrt((x[i] - x[i - 1]) ** 2 + (y[i] - y[i - 1]) ** 2) for i in range(1, n)]
+		L = sum(lv)
+		return L
+
+	def getpathScore(self):
+		Mean =0
+		if 0 < len(self.scores):
+			Mean= statistics.mean(self.scores)
+		return Mean
+
+	def getNubTimesDetect(self):
+		return len(self.scores)
+
+	def IsCounted(self):
+		return self.IsCounted
 
 class CentroidTracker:
 	def __init__(self, maxDisappeared=50, maxDistance=50):
@@ -15,6 +56,7 @@ class CentroidTracker:
 		self.disappeared = OrderedDict()
 		self.bboxes = OrderedDict()
 		self.trackers = OrderedDict()
+		self.Paths= OrderedDict()
 		# store the number of maximum consecutive frames a given
 		# object is allowed to be marked as "disappeared" until we
 		# need to deregister the object from tracking
@@ -25,15 +67,17 @@ class CentroidTracker:
 		# distance we'll start to mark the object as "disappeared"
 		self.maxDistance = maxDistance
 
-	def register(self, frame,centroid ,rect):
+	def register(self, frame,centroid ,rect,score):
 		# when registering an object we use the next available object
 		# ID to store the centroid
 		self.objects[self.nextObjectID] = centroid
-		tracker = cv2.TrackerCSRT_create()
-		tracker.init(frame, (rect[0], rect[1], rect[2] - rect[0],rect[3] - rect[1]))
+		tracker = cv2.TrackerKCF_create()
+		tracker.init(frame, (rect[0], rect[1], rect[2]-rect[0] ,rect[3]-rect[1] ))
 		self.trackers[self.nextObjectID] = tracker
 		self.disappeared[self.nextObjectID] = 0
 		self.bboxes[self.nextObjectID] = rect
+		self.Paths[self.nextObjectID]= onePath(centroid,score)
+
 		self.nextObjectID += 1
 
 	def deregister(self, objectID):
@@ -43,8 +87,9 @@ class CentroidTracker:
 		del self.disappeared[objectID]
 		del self.bboxes[objectID]
 		del self.trackers[objectID]
+		del self.Paths[objectID]
 
-	def update(self,frame, rects, status):
+	def update(self,frame, rects, scores,status):
 		# check to see if the list of input bounding box rectangles
 		# is empty
 		if len(rects) == 0:
@@ -56,8 +101,8 @@ class CentroidTracker:
 				# if we have reached a maximum number of consecutive
 				# frames where a given object has been marked as
 				# missing, deregister it
-				if self.disappeared[objectID] > self.maxDisappeared:
-					self.deregister(objectID)
+				#if self.disappeared[objectID] > self.maxDisappeared:
+					#self.deregister(objectID)
 
 			# return early as there are no centroids or tracking info
 			# to update
@@ -77,7 +122,8 @@ class CentroidTracker:
 		# centroids and register each of them
 
 		if (len(self.objects) == 0) and (status == "Detecting"):
-			self.register(frame,inputCentroids[0], rects[0])
+			self.register(frame,inputCentroids[0], rects[0],scores[0])
+
 
 		if  0 < len(self.objects):
 			# grab the set of object IDs and corresponding centroids
@@ -133,8 +179,10 @@ class CentroidTracker:
 				self.objects[objectID] = inputCentroids[col]
 				self.disappeared[objectID] = 0
 				self.bboxes[objectID] = rects[col]
-				self.trackers[objectID].init(frame, (rects[col][0],  rects[col][1],  rects[col][2] - rects[col][0], rects[col][3] -rects[col][1]))
-				cv2.rectangle(frame, (rects[col][0],  rects[col][1]), ( rects[col][2], rects[col][3]), (0, 255, 0), 2, 1)
+				self.trackers[objectID] = cv2.TrackerKCF_create()
+				self.trackers[objectID].init(frame, (rects[col][0],  rects[col][1],  rects[col][2]-rects[col][0], rects[col][3]- rects[col][1]))
+				cv2.rectangle(frame, (rects[col][0],  rects[col][1]), (rects[col][2],  rects[col][3]), (0, 0, 255), 2, 1)
+				self.Paths[objectID].addCentroid(inputCentroids[col],  scores[col] )
 				# indicate that we have examined each of the row and
 				# column indexes, respectively
 				usedRows.add(row)
@@ -167,7 +215,7 @@ class CentroidTracker:
 				# grab the object ID for the corresponding row
 				# index and increment the disappeared counter
 				objectID = objectIDs[row]
-				self.disappeared[objectID] += 1
+				self.disappeared[objectID] = self.disappeared[objectID] + 1
 
 				# check to see if the number of consecutive
 				# frames the object has been marked "disappeared"
@@ -180,13 +228,13 @@ class CentroidTracker:
 
 			if status =="Detecting":
 				for col in unusedCols:
-					self.register(frame,inputCentroids[col],rects[col])
+					self.register(frame,inputCentroids[col],rects[col],scores[col])
 
 	# return the set of trackable objects
 		return self.objects
 
 	def track(self, frame):
-
+		invalidTracks = set()
 		for (objectID, tracker) in self.trackers.items():
 
 			# set the status of our system to be 'tracking' rather
@@ -195,21 +243,38 @@ class CentroidTracker:
 
 			ret, pos = self.trackers[objectID].update(frame)
 			#  pos = tracker.get_position()
+			if ret == False:
+				invalidTracks.add(objectID)
+				continue
+
 			roi = (pos[0], pos[1], pos[0] + pos[2], pos[1] + pos[3])
+
+
 			# unpack the position object
 			#                    roi = [pos.left(), pos.top(), pos.right(), pos.bottom()]
 			(startX, startY, endX, endY) = [int(n) for n in roi]
+			cv2.rectangle(frame, (startX, startY), (endX, endY ), (255, 0, 0), 2, 1)
 			# add the bounding box coordinates to the rectangles list
 			cX = int((startX + endX) / 2.0)
 			cY = int((startY + endY) / 2.0)
-#			cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 0, 255), 2, 1)
-			cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 0, 255), 2, 1)
+		#
 			self.objects[objectID] = (cX, cY)
 			self.bboxes[objectID]= (startX, startY, endX, endY)
-		# draw a horizontal line in the center of the frame -- once an
-		# object crosses this line we will determine whether they were
-		# moving 'up' or 'down'
+		for objectID in invalidTracks:
+			self.deregister(objectID)
 
-	#         objects = ct.update(rects, "Tracking")
-	# use the centroid tracker to associate the (1) old object
-	# centroids with (2) the new
+
+	def getpathScore(self,objectID):
+		return self.Paths[objectID].getpathScore()
+
+	def getpathlength(self,objectID):
+		return self.Paths[objectID].getpathlength()
+
+	def getNubTimesDetect(self,objectID):
+		return self.Paths[objectID].getNubTimesDetect()
+
+	def IsCounted(self,objectID):
+		return self.Paths[objectID].IsCounted
+
+	def setCounted(self,objectID,value):
+		self.Paths[objectID].IsCounted= value
