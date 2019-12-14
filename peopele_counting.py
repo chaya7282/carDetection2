@@ -35,6 +35,8 @@ import PIL.ImageColor as ImageColor
 import PIL.ImageDraw as ImageDraw
 import PIL.ImageFont as ImageFont
 
+
+
 class line:
     def __init__(self, point1,point2):
         self.point1 = point1
@@ -75,6 +77,20 @@ class line:
             y_line = self.m * val_point[0] + self.c
             pointDist = abs(y_line - val_point[1])
         return pointDist
+
+def non_max_suppression_with_tf(sess, boxes, scores, max_output_size, iou_threshold=0.5):
+    '''
+    Provide a tensorflow session and get non-maximum suppression
+
+    max_output_size, iou_threshold are passed to tf.image.non_max_suppression
+    '''
+    with tf.Session() as sess:
+        non_max_idxs = sess.run(tf.image.non_max_suppression(boxes, scores, max_output_size, iou_threshold=iou_threshold))
+        new_boxes = tf.cast(tf.gather(boxes, non_max_idxs), tf.int32)
+        new_scores = tf.gather(scores, non_max_idxs)
+        return sess.run([new_boxes, new_scores])
+
+# close any open windows
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-p", "--prototxt",  type=str,default=" XXX",
@@ -87,7 +103,7 @@ ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProject
                 help="path to optional output video file")
 ap.add_argument("-c", "--confidence", type=float, default=0.3,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=5,
+ap.add_argument("-s", "--skip-frames", type=int, default=2,
                 help="# of skip frames between detections")
 
 ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
@@ -174,7 +190,7 @@ H = None
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
-ct = CentroidTracker(maxDisappeared=60, maxDistance=70)
+ct = CentroidTracker(maxDisappeared=60, maxDistance=20)
 trackers = []
 trackableObjects = {}
 
@@ -221,7 +237,7 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 500< totalFrames:
+            if 200< totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
@@ -264,9 +280,11 @@ with detection_graph.as_default():
                              feed_dict={image_tensor: image_np_expanded})
 
 
+
                 boxes = np.squeeze(boxes)
                 classes = np.squeeze(classes).astype(np.int32)
                 scores = np.squeeze(scores)
+                #(boxes, scores) = non_max_suppression_with_tf(sess, boxes, scores, 100, iou_threshold=0.5)
 
                 for i in range(0,len(boxes)):
                    # with the prediction
@@ -276,18 +294,19 @@ with detection_graph.as_default():
                     # confidence
                     if confidence > args["confidence"]:
 
-                     # if the class label is not a person, ignore it
-                        if categories[classes[i]-1]['name'] != "car":
+                    # if the class label is not a person, ignore it
+                        if categories[classes[i]-1]['name'] != "car" :
                             continue
-                    # compute the (x, y)-coordinates of the bounding box
-                        # for the object
+                        #compute the (x, y)-coordinates of the bounding box
+                            # for the object
                         box = boxes[i] * np.array([H, W, H, W])
 
                         (ymin, xmin, ymax, xmax)= box.astype(np.int32)
 
                         rects.append((xmin, ymin, xmax, ymax))
+
                 objects = ct.update(frame,rects,scores, "Detecting")
-            # loop over the trackers
+         # loop over the trackers
 
 
             line_color = (0, 0, 255)
@@ -380,15 +399,3 @@ with detection_graph.as_default():
             vs.release()
 
 
-def non_max_suppression_with_tf(sess, boxes, scores, max_output_size, iou_threshold=0.5):
-    '''
-    Provide a tensorflow session and get non-maximum suppression
-
-    max_output_size, iou_threshold are passed to tf.image.non_max_suppression
-    '''
-    non_max_idxs = tf.image.non_max_suppression(boxes, scores, max_output_size, iou_threshold=iou_threshold)
-    new_boxes = tf.cast(tf.gather(boxes, non_max_idxs), tf.int32)
-    new_scores = tf.gather(scores, non_max_idxs)
-
-    return sess.run([new_boxes, new_scores])
-# close any open windows
