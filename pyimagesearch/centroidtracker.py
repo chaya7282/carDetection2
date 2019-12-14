@@ -1,6 +1,7 @@
 # import the necessary packages
 from scipy.spatial import distance as dist
 from collections import OrderedDict
+from pyimagesearch.Rect_Comperator import rectComperator
 import numpy as np
 import cv2
 import statistics
@@ -57,15 +58,10 @@ class CentroidTracker:
 		self.bboxes = OrderedDict()
 		self.trackers = OrderedDict()
 		self.Paths= OrderedDict()
-		# store the number of maximum consecutive frames a given
-		# object is allowed to be marked as "disappeared" until we
-		# need to deregister the object from tracking
-		self.maxDisappeared = maxDisappeared
 
-		# store the maximum distance between centroids to associate
-		# an object -- if the distance is larger than this maximum
-		# distance we'll start to mark the object as "disappeared"
+		self.maxDisappeared = maxDisappeared
 		self.maxDistance = maxDistance
+		self.rectComperatorObj = rectComperator(100,1)
 
 	def register(self, frame,centroid ,rect,score):
 		# when registering an object we use the next available object
@@ -77,7 +73,7 @@ class CentroidTracker:
 		self.disappeared[self.nextObjectID] = 0
 		self.bboxes[self.nextObjectID] = rect
 		self.Paths[self.nextObjectID]= onePath(centroid,score)
-
+		self.rectComperatorObj.add(rect, score)
 		self.nextObjectID += 1
 
 	def deregister(self, objectID):
@@ -101,8 +97,8 @@ class CentroidTracker:
 				# if we have reached a maximum number of consecutive
 				# frames where a given object has been marked as
 				# missing, deregister it
-				#if self.disappeared[objectID] > self.maxDisappeared:
-					#self.deregister(objectID)
+				if self.disappeared[objectID] > self.maxDisappeared:
+					self.deregister(objectID)
 
 			# return early as there are no centroids or tracking info
 			# to update
@@ -189,11 +185,6 @@ class CentroidTracker:
 				usedCols.add(col)
 
 
-			for row in range(len(objectCentroids)):
-				for col in range(len(inputCentroids)):
-					if D[row][col] < self.maxDistance:
-						usedCols.add(col)
-
 
 
 			# compute both the row and column index we have NOT yet
@@ -234,12 +225,9 @@ class CentroidTracker:
 		return self.objects
 
 	def track(self, frame):
+		frame2= frame
 		invalidTracks = set()
 		for (objectID, tracker) in self.trackers.items():
-
-			# set the status of our system to be 'tracking' rather
-			# than 'waiting' or 'detecting'
-			# update the tracker and grab the updated position
 
 			ret, pos = self.trackers[objectID].update(frame)
 			#  pos = tracker.get_position()
@@ -247,19 +235,23 @@ class CentroidTracker:
 				invalidTracks.add(objectID)
 				continue
 
+
 			roi = (pos[0], pos[1], pos[0] + pos[2], pos[1] + pos[3])
-
-
-			# unpack the position object
-			#                    roi = [pos.left(), pos.top(), pos.right(), pos.bottom()]
 			(startX, startY, endX, endY) = [int(n) for n in roi]
-			cv2.rectangle(frame, (startX, startY), (endX, endY ), (255, 0, 0), 2, 1)
+			#cv2.rectangle(frame2, (startX, startY), (endX, endY ), (255, 0, 0), 2, 1)
 			# add the bounding box coordinates to the rectangles list
 			cX = int((startX + endX) / 2.0)
 			cY = int((startY + endY) / 2.0)
-		#
+			area = pos[2]*pos[3]
 			self.objects[objectID] = (cX, cY)
 			self.bboxes[objectID]= (startX, startY, endX, endY)
+			ret, meanArea, stdArea = self.rectComperatorObj. compareArea(self.bboxes[objectID],frame)
+			if ret == True:
+				if (1.4 < area/meanArea) or  (area/meanArea < 0.6):
+					invalidTracks.add(objectID)
+					#cv2.rectangle(frame2, (startX, startY), (endX, endY), (0, 255, 0), 2, 1)
+			cv2.imwrite("trackTest.jpg",frame2)
+			c=3
 		for objectID in invalidTracks:
 			self.deregister(objectID)
 
