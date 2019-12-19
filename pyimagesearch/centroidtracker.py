@@ -19,6 +19,10 @@ class onePath:
 
 		self.addCentroid(centroid,  score )
 		self.IsCounted = False;
+		self.TimesRejected =0;
+		self.IsDead =False;
+		self.RejectedMeanArea=0
+		selfIsCounted= False;
 
 	def addCentroid(self, centroid,  score ):
 		self.pts.insert(0,centroid)
@@ -46,6 +50,18 @@ class onePath:
 	def IsCounted(self):
 		return self.IsCounted
 
+	def  getIfDead(self):
+		return  self.IsDead;
+
+	def setIsCounted(self):
+		self.IsCounted= True;
+
+	def getIsCounted(self):
+		return self.IsCounted
+
+
+
+
 class CentroidTracker:
 	def __init__(self, maxDisappeared=50, maxDistance=50):
 		# initialize the next unique object ID along with two ordered
@@ -58,10 +74,10 @@ class CentroidTracker:
 		self.bboxes = OrderedDict()
 		self.trackers = OrderedDict()
 		self.Paths= OrderedDict()
-
+		self.DeadPaths = OrderedDict()
 		self.maxDisappeared = maxDisappeared
 		self.maxDistance = maxDistance
-		self.rectComperatorObj = rectComperator(100,1)
+		self.rectComperatorObj = rectComperator(40,3)
 
 	def register(self, frame,centroid ,rect,score):
 		# when registering an object we use the next available object
@@ -69,6 +85,7 @@ class CentroidTracker:
 		self.objects[self.nextObjectID] = centroid
 		tracker = cv2.TrackerKCF_create()
 		tracker.init(frame, (rect[0], rect[1], rect[2]-rect[0] ,rect[3]-rect[1] ))
+		cv2.rectangle(frame, (rect[0], rect[1]), (rect[2], rect[3]), (0, 0, 255), 2, 1)
 		self.trackers[self.nextObjectID] = tracker
 		self.disappeared[self.nextObjectID] = 0
 		self.bboxes[self.nextObjectID] = rect
@@ -83,6 +100,8 @@ class CentroidTracker:
 		del self.disappeared[objectID]
 		del self.bboxes[objectID]
 		del self.trackers[objectID]
+
+		self.DeadPaths[objectID]= self.Paths[objectID]
 		del self.Paths[objectID]
 
 	def update(self,frame, rects, scores,status):
@@ -132,6 +151,10 @@ class CentroidTracker:
 			# object centroid
 			D = dist.cdist(np.array(objectCentroids), inputCentroids)
 
+			for row in range(len(self.bboxes)):
+				for col in range(len(rects)):
+					D[row,col]= rectComperator.get_iou(rects[col],self.bboxes[row])
+					D[row, col] = 1- D[row,col]
 			# in order to perform this matching we must (1) find the
 			# smallest value in each row and then (2) sort the row
 			# indexes based on their minimum values so that the row
@@ -151,7 +174,8 @@ class CentroidTracker:
 			usedCols = set()
 
 
-			# loop overrow the combination of the (row, column) index
+
+				# loop overrow the combination of the (row, column) index
 			# loop over the combination of the (row, column) index
 			# tuples
 			for (row, col) in zip(rows, cols):
@@ -174,17 +198,21 @@ class CentroidTracker:
 				objectID = objectIDs[row]
 				self.objects[objectID] = inputCentroids[col]
 				self.disappeared[objectID] = 0
-				self.bboxes[objectID] = rects[col]
+				self.bboxes[objectID] = [rects[col][0],rects[col][1] ,rects[col][2] ,rects[col][3]]
 				self.trackers[objectID] = cv2.TrackerKCF_create()
 				self.trackers[objectID].init(frame, (rects[col][0],  rects[col][1],  rects[col][2]-rects[col][0], rects[col][3]- rects[col][1]))
 				cv2.rectangle(frame, (rects[col][0],  rects[col][1]), (rects[col][2],  rects[col][3]), (0, 0, 255), 2, 1)
 				self.Paths[objectID].addCentroid(inputCentroids[col],  scores[col] )
+				self.rectComperatorObj.add(rects[col], scores[col])
 				# indicate that we have examined each of the row and
 				# column indexes, respectively
 				usedRows.add(row)
 				usedCols.add(col)
 
-
+			for row in range(len(objectCentroids)):
+				for col in range(len(inputCentroids)):
+					if D[row][col] < self.maxDistance:
+						usedCols.add(col)
 
 
 			# compute both the row and column index we have NOT yet
@@ -225,7 +253,7 @@ class CentroidTracker:
 		return self.objects
 
 	def track(self, frame):
-		frame2= frame
+		frame2= frame.copy()
 		invalidTracks = set()
 		for (objectID, tracker) in self.trackers.items():
 
@@ -243,13 +271,19 @@ class CentroidTracker:
 			cX = int((startX + endX) / 2.0)
 			cY = int((startY + endY) / 2.0)
 			area = pos[2]*pos[3]
-			self.objects[objectID] = (cX, cY)
-			self.bboxes[objectID]= (startX, startY, endX, endY)
-			ret, meanArea, stdArea = self.rectComperatorObj. compareArea(self.bboxes[objectID],frame)
+			self.objects[objectID] =np.array ([cX, cY])
+			self.bboxes[objectID]= [startX, startY, endX, endY]
+			ret, meanArea, stdArea = self.rectComperatorObj. compareArea(self.bboxes[objectID],frame2)
 			if ret == True:
 				if (1.4 < area/meanArea) or  (area/meanArea < 0.6):
-					invalidTracks.add(objectID)
-					#cv2.rectangle(frame2, (startX, startY), (endX, endY), (0, 255, 0), 2, 1)
+					self.Paths[objectID].RejectedMeanArea = self.Paths[objectID].RejectedMeanArea +1
+					cv2.rectangle(frame2, (startX, startY), (endX, endY), (0, 255, 0), 2, 1)
+				elif area/meanArea <1.1 and 0.8<  area/meanArea:
+					self.Paths[objectID].RejectedMeanArea = self.Paths[objectID].RejectedMeanArea -1
+
+					c=3
+					#invalidTracks.add(objectID)
+
 			cv2.imwrite("trackTest.jpg",frame2)
 			c=3
 		for objectID in invalidTracks:
@@ -270,3 +304,16 @@ class CentroidTracker:
 
 	def setCounted(self,objectID,value):
 		self.Paths[objectID].IsCounted= value
+
+	def  removeFromDeadList(self,objectID):
+		del self.DeadPaths[objectID]
+
+	def IsInDeathList(self,objectID):
+		to = self.DeadPaths.get(objectID, None)
+		if to is None:
+			return False
+		else:
+			return True
+
+	def HowManyTimeRejected(self,objectID):
+		return self.Paths[objectID].RejectedMeanArea
