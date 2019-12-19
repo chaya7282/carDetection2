@@ -34,61 +34,11 @@ import PIL.Image as Image
 import PIL.ImageColor as ImageColor
 import PIL.ImageDraw as ImageDraw
 import PIL.ImageFont as ImageFont
+import maximal_suppression
 
 
 
-class line:
-    def __init__(self, point1,point2):
-        self.point1 = point1
-        self.point2 = point2
 
-        x_coords, y_coords = zip(*[self.point1,self. point2])
-        A = vstack([x_coords,ones(len(x_coords))]).T
-        m, c = lstsq(A, y_coords)[0]
-        self.m =m
-        self.c =c
-
-#Line Solution is y = {m}x + {c}".
-    def is_point_up_line(self,val_point):
-        if (val_point[0] < self.point1[0] and   self.point2[0] < val_point[0]) or (val_point[0] < self.point2[0] and  self.point1[0] < val_point[0]):
-
-            y_line = self.m * val_point[0]+ self.c
-            if   y_line < val_point[1]:
-                return True
-            else:
-                return False
-        else:
-            return False
-
-    def is_point_down_line(self,val_point):
-        if (val_point[0] < self.point1[0] and self.point2[0] < val_point[0]) or ( val_point[0] < self.point2[0] and self.point1[0] < val_point[0]):
-            y_line = self.m * val_point[0] + self.c
-            if   val_point[1]  < y_line  :
-                return True
-            else:
-                return False
-        else:
-            return False
-
-    def point_distance_from_line(self,val_point):
-        pointDist= 10000000
-
-        if (val_point[0] < self.point1[0] and self.point2[0] < val_point[0]) or ( val_point[0] < self.point2[0] and self.point1[0] < val_point[0]):
-            y_line = self.m * val_point[0] + self.c
-            pointDist = abs(y_line - val_point[1])
-        return pointDist
-
-def non_max_suppression_with_tf(sess, boxes, scores, max_output_size, iou_threshold=0.5):
-    '''
-    Provide a tensorflow session and get non-maximum suppression
-
-    max_output_size, iou_threshold are passed to tf.image.non_max_suppression
-    '''
-    with tf.Session() as sess:
-        non_max_idxs = sess.run(tf.image.non_max_suppression(boxes, scores, max_output_size, iou_threshold=iou_threshold))
-        new_boxes = tf.cast(tf.gather(boxes, non_max_idxs), tf.int32)
-        new_scores = tf.gather(scores, non_max_idxs)
-        return sess.run([new_boxes, new_scores])
 
 # close any open windows
 # construct the argument parse and parse the arguments
@@ -103,7 +53,7 @@ ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProject
                 help="path to optional output video file")
 ap.add_argument("-c", "--confidence", type=float, default=0.3,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=2,
+ap.add_argument("-s", "--skip-frames", type=int, default=3,
                 help="# of skip frames between detections")
 
 ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
@@ -190,7 +140,7 @@ H = None
 # instantiate our centroid tracker, then initialize a list to store
 # each of our dlib correlation trackers, followed by a dictionary to
 # map each unique object ID to a TrackableObject
-ct = CentroidTracker(maxDisappeared=60, maxDistance=20)
+ct = CentroidTracker(maxDisappeared=60, maxDistance=0.7)
 trackers = []
 trackableObjects = {}
 
@@ -204,7 +154,7 @@ car_count =0;
 # start the frames per second throughput estimator
 line_coord =[(337,230),(700,581)]
 #for police car video
-cross_line = line((380,380),(1043,427))
+
 (ret, frame2) = vs.read()
 cv2.imwrite("test.jpg", frame2)
 
@@ -237,7 +187,7 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 200< totalFrames:
+            if 600< totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
@@ -304,6 +254,14 @@ with detection_graph.as_default():
                         (ymin, xmin, ymax, xmax)= box.astype(np.int32)
 
                         rects.append((xmin, ymin, xmax, ymax))
+                rectsTmp= np.zeros( [len(rects),4],dtype= float)
+                for row in range( len(rectsTmp)):
+                    for col in range(4):
+                        rectsTmp[row,col]= float(rects[row][col])
+                rectsTmp =  maximal_suppression.non_max_suppression_fast(rectsTmp, 0.6)
+                rects =[]
+                for row in range(len( rectsTmp )):
+                    rects.append((rectsTmp[row,0],rectsTmp[row,1], rectsTmp[row,2], rectsTmp[row,3]))
 
                 objects = ct.update(frame,rects,scores, "Detecting")
          # loop over the trackers
@@ -332,32 +290,23 @@ with detection_graph.as_default():
                 text = "ID {}".format(objectID)
                 cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                text = "Mean score {0:.2f}".format(ct.getpathScore(objectID))
-                cv2.putText(frame, text, (centroid[0] - 20, centroid[1] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                text = "Path Length {0:.2f}".format(ct.getpathlength(objectID))
-                cv2.putText(frame, text, (centroid[0] - 30, centroid[1] - 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
                 text = "Times  detected {0:.2f}".format(ct.getNubTimesDetect(objectID))
                 cv2.putText(frame, text, (centroid[0] - 40, centroid[1] - 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                text = "Mean score {0:.2f}".format(ct.getpathScore(objectID))
-                cv2.putText(frame, text, (centroid[0] - 20, centroid[1] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-                cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
-
-                if (5 <  ct.getNubTimesDetect(objectID)) and not ct.IsCounted(objectID) and  (0.5 < ct.getpathScore(objectID) ):
-                    car_count = car_count +1
-                    ct.setCounted(objectID,True)
 
 #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
             #cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
             # construct a tuple of information we will be displaying on the
             # frame
+
+            for (objectID) in ct.DeadPaths:
+
+                if ct.IsInDeathList(objectID) and (5 < ct.DeadPaths[objectID].getNubTimesDetect()) and (ct.DeadPaths[objectID].RejectedMeanArea < 1):
+                    car_count = car_count + 1
+                    ct.removeFromDeadList(objectID)
 
             info = [
                 ("car_count", car_count),
