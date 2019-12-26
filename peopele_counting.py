@@ -29,7 +29,7 @@ from numpy.linalg import lstsq
 import os
 # Object detection imports
 from utils import label_map_util
-
+from Track_evaluator import TrackEvaluator
 import PIL.Image as Image
 import PIL.ImageColor as ImageColor
 import PIL.ImageDraw as ImageDraw
@@ -53,7 +53,7 @@ ap.add_argument("-o", "--output", type=str,default= "/home/ubuntu/PycharmProject
                 help="path to optional output video file")
 ap.add_argument("-c", "--confidence", type=float, default=0.3,
                 help="minimum probability to filter weak detections")
-ap.add_argument("-s", "--skip-frames", type=int, default=3,
+ap.add_argument("-s", "--skip-frames", type=int, default=6,
                 help="# of skip frames between detections")
 
 ap.add_argument("-t", "--draw-trajectory", type=bool, default=False,
@@ -143,7 +143,7 @@ H = None
 ct = CentroidTracker(maxDisappeared=60, maxDistance=0.7)
 trackers = []
 trackableObjects = {}
-
+trackEval = TrackEvaluator()
 # initialize the total number of frames processed thus far, along
 
 # with the total number of objects that have moved either up or down
@@ -187,7 +187,7 @@ with detection_graph.as_default():
             ret = False
             time.sleep(2.0)
 
-            if 600< totalFrames:
+            if 400< totalFrames:
                 break
             # frame = frame[1] if args.get("input", False) else frame
             (ret, frame) = vs.read()
@@ -252,8 +252,11 @@ with detection_graph.as_default():
                         box = boxes[i] * np.array([H, W, H, W])
 
                         (ymin, xmin, ymax, xmax)= box.astype(np.int32)
+                        centroid = ((ymin+ymax)/2, (xmin+xmax)/2)
 
                         rects.append((xmin, ymin, xmax, ymax))
+                        trackEval.addCoordinate(centroid,confidence, (ymin, xmin, ymax, xmax))
+
                 rectsTmp= np.zeros( [len(rects),4],dtype= float)
                 for row in range( len(rectsTmp)):
                     for col in range(4):
@@ -292,10 +295,6 @@ with detection_graph.as_default():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
 
-                text = "Times  detected {0:.2f}".format(ct.getNubTimesDetect(objectID))
-                cv2.putText(frame, text, (centroid[0] - 40, centroid[1] - 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
 
 #      cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]), (cross_line.point2[0],cross_line.point2[1]), line_color, 2)
             #cv2.line(frame, (cross_line.point1[0],cross_line.point1[1]),(cross_line.point2[0],cross_line.point2[1]),line_color, 2)
@@ -304,9 +303,6 @@ with detection_graph.as_default():
 
             for (objectID) in ct.DeadPaths:
 
-                if ct.IsInDeathList(objectID) and (5 < ct.DeadPaths[objectID].getNubTimesDetect()) and (ct.DeadPaths[objectID].RejectedMeanArea < 1):
-                    car_count = car_count + 1
-                    ct.removeFromDeadList(objectID)
 
             info = [
                 ("car_count", car_count),
